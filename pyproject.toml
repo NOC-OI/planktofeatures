@@ -1,0 +1,40 @@
+[project]
+name = "planktofeatures"
+dynamic = ["version"]
+authors = [
+  { name="Alex Baldwin", email="contact@alexbaldwin.dev" },
+]
+license = { text="LGPL-3.0" }
+description = "A Python module for creating morphometric feature information for plankton data."
+readme = "README.md"
+requires-python = ">=3.6"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy >= 1.13.3",
+    "pillow >= 8.3.1",
+    "pandas",
+    "scipy",
+    "scikit-image",
+    "phasepack",
+    "pyfftw",
+    "scikit-learn"
+]
+
+[project.urls]
+Homepage = "https://github.com/NOC-OI/planktofeatures"
+Issues = "https://github.com/NOC-OI/planktofeatures/issues"
+
+[tool.setuptools.dynamic]
+
+[tool.setuptools]
+packages = ["planktofeatures", "planktofeatures.whoi_v4"]
+package-dir = {"" = "src"}
+
+[tool.setuptools_scm]
+
+[build-system]
+requires = ["setuptools>=64", "setuptools-scm>=8"]
+build-backend = "setuptools.build_meta"
