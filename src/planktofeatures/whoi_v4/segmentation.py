@@ -9,8 +9,8 @@ from sklearn.cluster import KMeans
 from .phasecong import phasecong_Mm
 from .morphology import SE3, hysthresh, bwmorph_thin
 
-SE2 = diamond(2, np.bool)
-SED = diamond(1, np.bool)
+SE2 = diamond(2, bool)
+SED = diamond(1, bool)
 
 # parameters
 HT_T1, HT_T2 = 0.3, 0.09
