@@ -418,7 +418,7 @@ class RoiFeatures(object):
         return self.ring_wedge[3]
     @lru_cache()
     def summed_attr(self, attr):
-        return np.sum(getattr(b,attr) for b in self.blobs)
+        return np.sum(list(getattr(b,attr) for b in self.blobs))
     @property
     def summed_area(self):
         return self.summed_attr('area')
