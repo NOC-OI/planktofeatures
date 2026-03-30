@@ -67,7 +67,7 @@ def segment_roi(roi, raw_stitch=None):
     B = binary_fill_holes(B)
     # step 8. erode and remove small blobs
     B_eroded = binary_erosion(B, SED)
-    if np.sum(apply_blob_min(B_eroded)) > 0:
+    if np.sum(np.fromiter(apply_blob_min(B_eroded))) > 0:
         B = B_eroded
     B = apply_blob_min(B)
     return B
