@@ -1,6 +1,6 @@
 #!/bin/python3
 
-# Copyright 2025, A Baldwin, National Oceanography Centre
+# Copyright 2025, Hannah Baldwin, National Oceanography Centre
 #
 # This file is part of planktofeatures.
 #

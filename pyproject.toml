@@ -2,7 +2,7 @@
 name = "planktofeatures"
 dynamic = ["version"]
 authors = [
-  { name="Alex Baldwin", email="contact@alexbaldwin.dev" },
+  { name="Hannah Baldwin", email="contact@hannahbaldwin.net" },
 ]
 license = { text="LGPL-3.0" }
 description = "A Python module for creating morphometric feature information for plankton data."
