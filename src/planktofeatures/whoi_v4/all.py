@@ -1,8 +1,9 @@
 import numpy as np
 
-from scipy.ndimage.measurements import find_objects
+from scipy.ndimage import find_objects
+from scipy.spatial import QhullError
 
-from skimage.measure import regionprops
+from skimage.measure import label, regionprops
 
 from functools import lru_cache
 
@@ -11,11 +12,12 @@ from .blobs import find_blobs, rotate_blob, blob_shape
 from .blob_geometry import (equiv_diameter, ellipse_properties,
                             invmoments, convex_hull, convex_hull_image,
                             convex_hull_properties, feret_diameter,
-                            binary_symmetry, feret_diameters)
+                            binary_symmetry, feret_diameters,
+                            explicit_orientation)
 from .morphology import find_perimeter
 from .biovolume import (distmap_volume_surface_area,
                         sor_volume_surface_area)
-from .perimeter import perimeter_stats, hausdorff_symmetry
+from .perimeter import perimeter_stats, hausdorff_symmetry, benkrid_perimeter
 from .texture import statxture, masked_pixels, texture_pixels
 from .hog import image_hog
 from .ringwedge import ring_wedge, _N_RINGS, _N_WEDGES
@@ -43,22 +45,27 @@ class BlobFeatures(object):
     @property
     @lru_cache()
     def regionprops(self):
-        """region props of the blob (assumes single connected region)"""
-        return regionprops(self.image.astype(np.uint8))[0]
+        """region props of the blob (assumes single connected region)."""
+        labels = label(self.image.astype(np.uint8), connectivity=2)
+        props = regionprops(labels)
+        if not props:
+            return None
+        # Use the largest region to match MATLAB's 8-connected component.
+        return max(props, key=lambda p: p.area)
     @property
     @lru_cache()
     def area(self):
         """area of blob"""
-        return self.regionprops.area
+        return int(self.regionprops.area)
     @property
     @lru_cache()
     def equiv_diameter(self):
         """equivalent diameter of blob"""
-        return self.regionprops.equivalent_diameter
+        return self.regionprops.equivalent_diameter_area
     @property
     @lru_cache()
     def perimeter(self):
-        return self.regionprops.perimeter
+        return benkrid_perimeter(self.perimeter_image)
     @property
     def area_over_perimeter_squared(self):
         return self.area / self.perimeter**2
@@ -74,11 +81,20 @@ class BlobFeatures(object):
     @lru_cache()
     def convex_hull(self):
         """vertices of convex hull of blob"""
-        return convex_hull(self.perimeter_points)
+        try:
+            return convex_hull(self.perimeter_points)
+        except QhullError:
+            # Colinear or degenerate perimeter points; fall back to raw points.
+            return np.vstack(self.perimeter_points).T
     @property
     @lru_cache()
     def convex_hull_properties(self):
-        return convex_hull_properties(self.convex_hull)
+        hull = self.convex_hull
+        if hull is None or hull.shape[0] < 3:
+            return self.perimeter, self.area
+        if np.linalg.matrix_rank(hull - hull[0]) < 2:
+            return self.perimeter, self.area
+        return convex_hull_properties(hull)
     @property
     @lru_cache()
     def convex_perimeter(self):
@@ -136,7 +152,7 @@ class BlobFeatures(object):
     @lru_cache()
     def orientation(self):
         """return orientation of blob in degrees"""
-        return (180/np.pi) * self.regionprops.orientation
+        return explicit_orientation(self.image)
     @property
     @lru_cache()
     def centroid(self):
@@ -186,7 +202,19 @@ class BlobFeatures(object):
     @lru_cache()
     def distmap_volume_surface_area(self):
         """volume of blob computed via Moberg & Sosik algorithm"""
-        return distmap_volume_surface_area(self.image, self.perimeter_image)
+        # MATLAB uses a tight cropped blob image for distmap via regionprops.Image.
+        img = self.regionprops.image.astype(bool)
+        # Match MATLAB blob_geomprop: use largest 8-connected component.
+        if img.any():
+            from scipy.ndimage import label
+            labeled, num = label(img, structure=np.ones((3, 3), dtype=np.int32))
+            if num > 1:
+                counts = np.bincount(labeled.ravel())
+                counts[0] = 0
+                largest = counts.argmax()
+                img = labeled == largest
+        perim = find_perimeter(img)
+        return distmap_volume_surface_area(img, perim)
     @property
     @lru_cache()
     def sor_volume_surface_area(self):
@@ -308,8 +336,7 @@ class RoiFeatures(object):
         the segmented mask, ordered by largest area to smallest area"""
         labeled, bboxes, blobs = find_blobs(self.blobs_image)
         cropped_rois = [self.image[bbox] for bbox in bboxes]
-        # ignore 1-pixel wide/high blobs
-        Bs = [BlobFeatures(b,R) for b,R in zip(blobs,cropped_rois) if min(R.shape) > 1]
+        Bs = [BlobFeatures(b, R) for b, R in zip(blobs, cropped_rois)]
         # sort by area, largest first
         return sorted(Bs, key=lambda B: B.area, reverse=True)
     @property
@@ -418,7 +445,9 @@ class RoiFeatures(object):
         return self.ring_wedge[3]
     @lru_cache()
     def summed_attr(self, attr):
-        return np.sum(list(getattr(b,attr) for b in self.blobs))
+        vals = np.array([getattr(b, attr) for b in self.blobs], dtype=np.float64)
+        # MATLAB stores blob props in double arrays and sums in double.
+        return float(np.sum(vals, dtype=np.float64))
     @property
     def summed_area(self):
         return self.summed_attr('area')
@@ -462,18 +491,10 @@ class ZeroMock(object):
     def __getattr__(self, name):
         return 0
 
-def compute_features(roi_image, blobs_image=None, raw_stitch=None):
-    r = RoiFeatures(roi_image, blobs_image, raw_stitch=raw_stitch)
-    if r.num_blobs > 0:
-        b = r.blobs[0]
-    else:
-        b = ZeroMock()
-    f = []
-    f += [
+def _blob_features(b):
+    """Extract per-blob features from a BlobFeatures object."""
+    return [
         ('Area', b.area),
-        ('B180', b.b180),
-        ('B90', b.b90),
-        ('Bflip', b.bflip),
         ('Biovolume', b.biovolume),
         ('BoundingBox_xwidth', b.bbox_xwidth),
         ('BoundingBox_ywidth', b.bbox_ywidth),
@@ -482,30 +503,29 @@ def compute_features(roi_image, blobs_image=None, raw_stitch=None):
         ('Eccentricity', b.eccentricity),
         ('EquivDiameter', b.equiv_diameter),
         ('Extent', b.extent),
-        ('H180', b.h180),
-        ('H90', b.h90),
-        ('Hflip', b.hflip),
         ('MajorAxisLength', b.major_axis_length),
         ('MinorAxisLength', b.minor_axis_length),
         ('Orientation', b.orientation),
         ('Perimeter', b.perimeter),
-        ('RWcenter2total_powerratio', r.rw_power_ratio),
-        ('RWhalfpowerintegral', r.rw_power_integral),
         ('RepresentativeWidth', b.representative_width),
-        ('RotatedBoundingBox_xwidth', b.rotated_bbox_xwidth),
-        ('RotatedBoundingBox_ywidth', b.rotated_bbox_ywidth),
         ('Solidity', b.solidity),
         ('SurfaceArea', b.surface_area),
         ('maxFeretDiameter', b.max_feret_diameter),
-        ('minFeretDiameter', b.min_feret_diameter)
+        ('minFeretDiameter', b.min_feret_diameter),
     ]
-    f += get_multifeature('moment_invariant%d', r.invmoments)
+
+BLOB_FEATURE_COLUMNS = [name for name, _ in _blob_features(ZeroMock())]
+
+def compute_features(roi_image, blobs_image=None, raw_stitch=None):
+    r = RoiFeatures(roi_image, blobs_image, raw_stitch=raw_stitch)
+    if r.num_blobs > 0:
+        b = r.blobs[0]
+    else:
+        b = ZeroMock()
+    f = []
+    f += _blob_features(b)
     f += [
         ('numBlobs', r.num_blobs),
-        ('shapehist_kurtosis_normEqD', b.perimeter_kurtosis),
-        ('shapehist_mean_normEqD', b.perimeter_mean),
-        ('shapehist_median_normEqD', b.perimeter_median),
-        ('shapehist_skewness_normEqD', b.perimeter_skewness),
         ('summedArea', r.summed_area),
         ('summedBiovolume', r.summed_biovolume),
         ('summedConvexArea', r.summed_convex_area),
@@ -514,23 +534,20 @@ def compute_features(roi_image, blobs_image=None, raw_stitch=None):
         ('summedMinorAxisLength', r.summed_minor_axis_length),
         ('summedPerimeter', r.summed_perimeter),
         ('summedSurfaceArea', r.summed_surface_area),
-        ('texture_average_contrast', r.texture_average_contrast),
-        ('texture_average_gray_level', r.texture_average_gray_level),
-        ('texture_entropy', r.texture_entropy),
-        ('texture_smoothness', r.texture_smoothness),
-        ('texture_third_moment', r.texture_third_moment),
-        ('texture_uniformity', r.texture_uniformity)
     ]
-    f += get_multifeature('Wedge%02d', r.wedge)
-    f += get_multifeature('Ring%02d', r.ring)
-    f += get_multifeature('HOG%02d', r.hog)
+    def _zero_to_nan(v):
+        return float('nan') if v == 0 else v
     f += [
-        ('Area_over_PerimeterSquared', b.area_over_perimeter_squared),
-        ('Area_over_Perimeter', b.area_over_perimeter),
-        ('H90_over_Hflip', b.h90_over_hflip),
-        ('H90_over_H180', b.h90_over_h180),
-        ('Hflip_over_H180', b.hflip_over_h180),
-        ('summedConvexPerimeter_over_Perimeter', r.summed_convex_perimeter_over_perimeter),
-        ('rotated_BoundingBox_solidity', b.rotated_bbox_solidity)
+        ('Area_over_PerimeterSquared', _zero_to_nan(b.area_over_perimeter_squared)),
+        ('Area_over_Perimeter', _zero_to_nan(b.area_over_perimeter)),
+        ('summedConvexPerimeter_over_Perimeter', _zero_to_nan(r.summed_convex_perimeter_over_perimeter)),
     ]
-    return (r.blobs_image, f)
+
+    # Collect per-blob features for multiblob ROIs (numBlobs > 1)
+    multiblob_rows = []
+    if r.num_blobs > 1:
+        for blob_number, blob in enumerate(r.blobs, start=1):
+            row = dict(_blob_features(blob))
+            multiblob_rows.append((blob_number, row))
+
+    return (r.blobs_image, f, multiblob_rows)
