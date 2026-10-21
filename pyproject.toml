@@ -18,7 +18,6 @@ dependencies = [
     "pandas",
     "scipy",
     "scikit-image",
-    "phasepack >= 1.6.1",
     "pyfftw",
     "scikit-learn"
 ]
