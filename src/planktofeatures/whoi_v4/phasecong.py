@@ -24,7 +24,7 @@
 # IFCB-specific optimizations and utilites by Joe Futrelle @ WHOI 2016
 
 import numpy as np
-from phasepack import phasecong
+from .phasepack import phasecong
 
 # IFCB-specific utility
 

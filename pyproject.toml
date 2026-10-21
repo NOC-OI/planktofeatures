@@ -18,7 +18,7 @@ dependencies = [
     "pandas",
     "scipy",
     "scikit-image",
-    "phasepack",
+    "phasepack >= 1.6.1",
     "pyfftw",
     "scikit-learn"
 ]
@@ -30,7 +30,7 @@ Issues = "https://github.com/NOC-OI/planktofeatures/issues"
 [tool.setuptools.dynamic]
 
 [tool.setuptools]
-packages = ["planktofeatures", "planktofeatures.whoi_v4"]
+packages = ["planktofeatures", "planktofeatures.whoi_v4", "planktofeatures.whoi_v4.phasepack"]
 package-dir = {"" = "src"}
 
 [tool.setuptools_scm]

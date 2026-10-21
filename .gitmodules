@@ -1,0 +1,6 @@
+[submodule "submodules/phasepack"]
+	path = submodules/phasepack
+	url = https://github.com/WHOIGit/phasepack.git
+[submodule "submodules/ifcb-features"]
+	path = submodules/ifcb-features
+	url = https://github.com/WHOIGit/ifcb-features.git
